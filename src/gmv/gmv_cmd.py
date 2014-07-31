@@ -399,6 +399,21 @@ class GMVaultLauncher(object):
                                    default=None,
                                    help='specify a from field to export')
 
+        export_parser.add_argument('-xf', '--xfrom', \
+                                   action='append', dest='xfrom', \
+                                   default=None,
+                                   help='specify a from field to skip')
+
+        export_parser.add_argument('-cc', '--cc', \
+                                   action='append', dest='cc', \
+                                   default=None,
+                                   help='specify a cc field to export')
+
+        export_parser.add_argument('-xcc', '--xcc', \
+                                   action='append', dest='xcc', \
+                                   default=None,
+                                   help='specify a cc field to skip')
+
         export_parser.add_argument("--debug", "-debug", \
                        action='store_true', help="Activate debugging info",\
                        dest="debug", default=False)
@@ -578,7 +593,10 @@ class GMVaultLauncher(object):
     
         elif parsed_args.get('command', '') == 'export':
             parsed_args['labels']     = options.label
-            parsed_args['froms']      = options.from
+            parsed_args['froms']      = getattr(options, 'from', '')
+            parsed_args['xfroms']     = options.xfrom
+            parsed_args['ccs']        = options.cc
+            parsed_args['xccs']       = options.xcc
             parsed_args['db-dir']     = options.db_dir
             parsed_args['output-dir'] = options.output_dir
             if options.type.lower() in self.EXPORT_TYPES:
@@ -619,7 +637,7 @@ class GMVaultLauncher(object):
         output_dir = export_type(args['output-dir'])
         LOG.critical("Export gmvault-db as a %s mailbox." % (args['type']))
         exporter = gmvault_export.GMVaultExporter(args['db-dir'], output_dir,
-            labels=args['labels'], froms=args['from'])
+            labels=args['labels'], froms=args['froms'], xfroms=args['xfroms'], ccs=args['ccs'], xccs=args['xccs'])
         exporter.export()
         output_dir.close()
 

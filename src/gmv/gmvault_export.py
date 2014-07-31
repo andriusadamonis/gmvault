@@ -21,6 +21,7 @@
 
 import os
 import re
+import email
 import mailbox
 
 import imapclient.imap_utf7 as imap_utf7
@@ -49,7 +50,7 @@ class GMVaultExporter(object):
     GM_SEEN = '\\Seen'
     GM_FLAGGED = '\\Flagged'
 
-    def __init__(self, db_dir, a_mailbox, labels = None, froms = None):
+    def __init__(self, db_dir, a_mailbox, labels = None, froms = None, xfroms = None, ccs = None, xccs = None):
         """
            constructor
         """
@@ -57,6 +58,9 @@ class GMVaultExporter(object):
         self.mailbox = a_mailbox
         self.labels = labels
         self.froms = froms
+        self.xfroms = xfroms
+        self.ccs = ccs
+        self.xccs = xccs
 
     def want_label(self, label):
         """ helper indicating is a label is needed"""
@@ -90,19 +94,38 @@ class GMVaultExporter(object):
         for a_id in ids:
             meta, msg = self.storer.unbury_email(a_id)
 
-            folders = [default_folder]
-            if use_labels:
-                add_labels = meta[gmvault_db.GmailStorer.LABELS_K]
-                if not add_labels:
-                    add_labels = [GMVaultExporter.ARCHIVED_FOLDER]
-                folders.extend(add_labels)
-            folders = [re.sub(r'^\\', '', f) for f in folders]
-            folders = [f for f in folders if self.want_label(f)]
+            include = True
+            if self.froms or self.ccs or self.xfroms or self.xccs:
+                ffrom, cc = gmvault_db.GmailStorer.parse_from_cc_fields(msg)
 
-            LOG.debug("Processing id %s in labels %s." % \
-                (a_id, self.printable_label_list(folders)))
-            for folder in folders:
-                self.mailbox.add(msg, folder, meta[gmvault_db.GmailStorer.FLAGS_K])
+                try:
+                    if include and self.froms and ffrom:
+                        include = any(x in ffrom for x in self.froms)
+                    if include and self.xfroms and ffrom:
+                        include = not any(x in ffrom for x in self.xfroms)
+                    if include and self.ccs and cc:
+                        include = any(x in cc for x in self.ccs)
+                    if include and self.xccs and cc:
+                        include = not any(x in cc for x in self.xccs)
+                except:
+                    print "FAILED:\n%s" % msg
+                    raise
+
+            if include:
+
+                folders = [default_folder]
+                if use_labels:
+                    add_labels = meta[gmvault_db.GmailStorer.LABELS_K]
+                    if not add_labels:
+                        add_labels = [GMVaultExporter.ARCHIVED_FOLDER]
+                    folders.extend(add_labels)
+                folders = [re.sub(r'^\\', '', f) for f in folders]
+                folders = [f for f in folders if self.want_label(f)]
+
+                LOG.debug("Processing id %s in labels %s." % \
+                    (a_id, self.printable_label_list(folders)))
+                for folder in folders:
+                    self.mailbox.add(msg, folder, meta[gmvault_db.GmailStorer.FLAGS_K])
 
             done += 1
             left = len(ids) - done

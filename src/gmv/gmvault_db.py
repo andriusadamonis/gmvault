@@ -33,7 +33,17 @@ import gmv.imap_utils as imap_utils
 import gmv.credential_utils as credential_utils
 
 LOG = log_utils.LoggerFactory.get_logger('gmvault_db')
-            
+
+def iterlines(lines):
+    retval = ''
+    for char in lines:
+        retval += char if not char == '\n' else ''
+        if char == '\n':
+            yield retval.strip('\r')
+            retval = ''
+    if retval:
+        yield retval.strip('\r')
+       
 class GmailStorer(object): #pylint:disable=R0902,R0904,R0914
     '''
        Store emails on disk
@@ -55,10 +65,14 @@ class GmailStorer(object): #pylint:disable=R0902,R0904,R0914
     HF_MSGID_PATTERN       = r"[M,m][E,e][S,s][S,s][a,A][G,g][E,e]-[I,i][D,d]:\s+<(?P<msgid>.*)>"
     HF_SUB_PATTERN         = r"[S,s][U,u][b,B][J,j][E,e][C,c][T,t]:\s+(?P<subject>.*)\s*"
     HF_XGMAIL_RECV_PATTERN = r"[X,x]-[G,g][M,m][A,a][I,i][L,l]-[R,r][E,e][C,c][E,e][I,i][V,v][E,e][D,d]:\s+(?P<received>.*)\s*"
+    HF_FROM_PATTERN        = r"^[F,f][R,r][O,o][M,m]:\s*(?P<from>.*)\s*"
+    HF_CC_PATTERN          = r"^[C,c][C,c]:\s*(?P<cc>.*)\s*"
     
     HF_MSGID_RE          = re.compile(HF_MSGID_PATTERN)
     HF_SUB_RE            = re.compile(HF_SUB_PATTERN)
     HF_XGMAIL_RECV_RE    = re.compile(HF_XGMAIL_RECV_PATTERN)
+    HF_FROM_RE           = re.compile(HF_FROM_PATTERN)
+    HF_CC_RE             = re.compile(HF_CC_PATTERN)
     
     ENCRYPTED_PATTERN = r"[\w+,\.]+crypt[\w,\.]*"
     ENCRYPTED_RE      = re.compile(ENCRYPTED_PATTERN)
@@ -270,7 +284,33 @@ class GmailStorer(object): #pylint:disable=R0902,R0904,R0914
             x_gmail_recv = matched.group('received').strip()
         
         return (subject, msgid, x_gmail_recv)
-    
+
+    @classmethod
+    def parse_from_cc_fields(cls, msg):
+        """
+           extract from and cc from the given msg
+        """
+        ffrom = None
+        cc   = None
+
+        for header_field in iterlines(msg):
+            
+            #if len(header_field) == 0:
+            #    break
+            # yra laisku, kur yra tarpas tarp headeriu...
+
+            # look for from
+            matched = GmailStorer.HF_FROM_RE.search(header_field)
+            if matched:
+                ffrom = matched.group('from').strip()
+          
+            # look for cc
+            matched = GmailStorer.HF_CC_RE.search(header_field)
+            if matched:
+                msgid = matched.group('cc').strip()
+
+        return (ffrom, cc)
+
     def get_all_chats_gmail_ids(self):
         """
            Get only chats dirs 
