@@ -310,3 +310,66 @@ class MBox(Mailbox):
         if GMVaultExporter.GM_FLAGGED in flags:
             mmsg.add_flag('F')
         self.subdir(folder).add(mmsg)
+
+class Eml(Mailbox):
+    """ Class dealing with MBox specificities """
+    def __init__(self, folder):
+        self.folder = folder
+        self.open = dict()
+        self.no = 1
+
+    def close(self):
+        print "-------------------------"
+        print self.open
+        print "-------------------------"
+        pass
+
+    def subdir(self, label):
+        segments = label.split(GMVaultExporter.GM_SEP)
+        # Safety first: No unusable directory portions
+        segments = [s for s in segments if s != '..' and s != '.']
+        real_label = GMVaultExporter.GM_SEP.join(segments)
+        if real_label in self.open:
+            return self.open[real_label]
+
+        cur_path = self.folder
+        label_segments = []
+        for s in segments:
+            label_segments.append(s)
+            cur_label = GMVaultExporter.GM_SEP.join(label_segments)
+            if cur_label not in self.open:
+                # Create an mbox for intermediate folders, to satisfy
+                # Thunderbird import
+                if not os.path.exists(cur_path):
+                    os.makedirs(cur_path)
+                mbox_path = os.path.join(cur_path, s)
+                self.open[cur_label] = mailbox.mbox(mbox_path)
+            # Use .sbd folders a la Thunderbird, to allow nested folders
+            cur_path = os.path.join(cur_path, s + '.sbd')
+
+        return self.open[real_label]
+
+    def add(self, msg, folder, flags):
+
+        full_path = os.path.join(self.folder, folder)
+        if not os.path.exists(full_path):
+            os.makedirs(full_path)
+
+        if full_path in self.open:
+            self.open[full_path] += 1
+        else:
+            self.open[full_path] = 1
+
+        full_path = os.path.join(full_path, "%s.eml" % self.open[full_path])
+
+        with open(full_path, "w") as msg_file:
+            msg_file.write(msg)
+        """
+        mmsg = mailbox.mboxMessage(msg)
+        if GMVaultExporter.GM_SEEN in flags:
+            mmsg.add_flag('R')
+        if GMVaultExporter.GM_FLAGGED in flags:
+            mmsg.add_flag('F')
+        mmsg.__str__
+        self.subdir(folder).add(mmsg)
+        """

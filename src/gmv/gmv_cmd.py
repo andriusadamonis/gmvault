@@ -141,7 +141,8 @@ class GMVaultLauncher(object):
                      ('offlineimap', gmvault_export.OfflineIMAP),
                      ('dovecot', gmvault_export.Dovecot),
                      ('maildir', gmvault_export.OfflineIMAP),
-                     ('mbox', gmvault_export.MBox)])
+                     ('mbox', gmvault_export.MBox),
+                     ('eml', gmvault_export.Eml)])
     EXPORT_TYPE_NAMES = ", ".join(EXPORT_TYPES)
     
     DEFAULT_GMVAULT_DB = "%s/gmvault-db" % (os.getenv("HOME", "."))
