@@ -360,9 +360,10 @@ class Eml(Mailbox):
         else:
             self.open[full_path] = 1
 
-        full_path = os.path.join(full_path, "%s.eml" % self.open[full_path])
+        full_path = os.path.join(full_path, "{:0>4d}.eml".format(self.open[full_path]))
 
-        with open(full_path, "w") as msg_file:
+        with open(full_path, "wb") as msg_file:
+            #dbg print " ".join("{:02x}".format(ord(c)) for c in msg)
             msg_file.write(msg)
         """
         mmsg = mailbox.mboxMessage(msg)
