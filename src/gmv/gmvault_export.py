@@ -49,13 +49,14 @@ class GMVaultExporter(object):
     GM_SEEN = '\\Seen'
     GM_FLAGGED = '\\Flagged'
 
-    def __init__(self, db_dir, a_mailbox, labels = None):
+    def __init__(self, db_dir, a_mailbox, labels = None, froms = None):
         """
            constructor
         """
         self.storer = gmvault_db.GmailStorer(db_dir)
         self.mailbox = a_mailbox
         self.labels = labels
+        self.froms = froms
 
     def want_label(self, label):
         """ helper indicating is a label is needed"""

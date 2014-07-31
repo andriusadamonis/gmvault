@@ -72,9 +72,9 @@ class TestGMVCMD(unittest.TestCase): #pylint:disable-msg=R0904
         self.gmvault_passwd = None 
     
     def setUp(self): #pylint:disable-msg=C0103
-        self.login, self.passwd = read_password_file('/homespace/gaubert/.ssh/passwd')
+        self.login, self.passwd = read_password_file(os.path.expanduser('~/.ssh/passwd'))
         
-        self.gsync_login, self.gsync_passwd = read_password_file('/homespace/gaubert/.ssh/gsync_passwd')
+        self.gsync_login, self.gsync_passwd = read_password_file(os.path.expanduser('~/.ssh/gsync_passwd'))
         
     def test_commandline_args(self):
         """
@@ -228,7 +228,32 @@ class TestGMVCMD(unittest.TestCase): #pylint:disable-msg=R0904
         self.assertEquals(args['debug'], True)
         self.assertEquals(args['restart'], True)
         
+        #test6 export
+        sys.argv = ['gmvault.py', 'export',
+                    '--db-dir','/tmp/new-db-1', \
+                    '-l', 'LABEL', '--label', '\\Sent', \
+                    '--from', 'from@from.no', '-f', 'from2@from.no', \
+                    '--xfrom', 'xfrom@from.no', \
+                    '--cc', 'cc@from.no', \
+                    '-xcc', 'xcc@from.no', \
+                    '~/gmvault-test']
         
+        #with emails only
+        gmvlt = gmv_cmd.GMVaultLauncher()
+    
+        args = gmvlt.parse_args()
+        
+        #check args
+        self.assertEquals(args['command'],  'export')
+        self.assertEquals(args['type'],     'mbox')
+        self.assertEquals(args['db-dir'],'/tmp/new-db-1')
+        self.assertEquals(args['labels'], ['LABEL', '\\Sent'])
+        self.assertEquals(args['froms'], ['from@from.no', 'from2@from.no'])
+        self.assertEquals(args['xfroms'], ['xfrom@from.no'])
+        self.assertEquals(args['ccs'], ['cc@from.no'])
+        self.assertEquals(args['xccs'], ['xcc@from.no'])
+
+
     def zztest_cli_bad_server(self):
         """
            Test the cli interface bad option

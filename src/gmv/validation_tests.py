@@ -17,6 +17,7 @@
 '''
 
 import unittest
+import os
 import base64
 
 import gmv.gmvault as gmvault
@@ -63,7 +64,7 @@ class TestGMVaultValidation(unittest.TestCase): #pylint:disable=R0904
         self.default_dir = "/tmp/gmvault-tests"
     
     def setUp(self): #pylint:disable=C0103
-        self.test_login, self.test_passwd = read_password_file('/homespace/gaubert/.ssh/gsync_passwd')
+        self.test_login, self.test_passwd = read_password_file(os.path.expanduser('~/.ssh/gsync_passwd'))
                 
     def test_help_msg_spawned_by_def(self):
         """

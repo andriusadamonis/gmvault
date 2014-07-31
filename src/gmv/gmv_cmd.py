@@ -393,6 +393,12 @@ class GMVaultLauncher(object):
                                    action='append', dest='label', \
                                    default=None,
                                    help='specify a label to export')
+
+        export_parser.add_argument('-f', '--from', \
+                                   action='append', dest='from', \
+                                   default=None,
+                                   help='specify a from field to export')
+
         export_parser.add_argument("--debug", "-debug", \
                        action='store_true', help="Activate debugging info",\
                        dest="debug", default=False)
@@ -572,6 +578,7 @@ class GMVaultLauncher(object):
     
         elif parsed_args.get('command', '') == 'export':
             parsed_args['labels']     = options.label
+            parsed_args['froms']      = options.from
             parsed_args['db-dir']     = options.db_dir
             parsed_args['output-dir'] = options.output_dir
             if options.type.lower() in self.EXPORT_TYPES:
@@ -612,7 +619,7 @@ class GMVaultLauncher(object):
         output_dir = export_type(args['output-dir'])
         LOG.critical("Export gmvault-db as a %s mailbox." % (args['type']))
         exporter = gmvault_export.GMVaultExporter(args['db-dir'], output_dir,
-            labels=args['labels'])
+            labels=args['labels'], froms=args['from'])
         exporter.export()
         output_dir.close()
 

@@ -16,6 +16,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 '''
 import unittest
+import os
 import gmv.gmvault as gmvault
 import gmv.gmvault_utils as gmvault_utils
 import gmv.test_utils as test_utils
@@ -37,13 +38,13 @@ class TestEssentialGMVault(unittest.TestCase): #pylint:disable-msg=R0904
     
     def setUp(self): #pylint:disable-msg=C0103
         """setup"""
-        self.gsync_login, self.gsync_passwd = test_utils.read_password_file('/homespace/gaubert/.ssh/gsync_passwd')
-        self.gmvault_test_login, self.gmvault_test_passwd = test_utils.read_password_file('/homespace/gaubert/.ssh/gmvault_test_passwd')
-        self.ba_login, self.ba_passwd = test_utils.read_password_file('/homespace/gaubert/.ssh/ba_passwd')
+        self.gsync_login, self.gsync_passwd = test_utils.read_password_file(os.path.expanduser('~/.ssh/gsync_passwd'))
+        self.gmvault_test_login, self.gmvault_test_passwd = test_utils.read_password_file(os.path.expanduser('~/.ssh/gmvault_test_passwd'))
+        self.ba_login, self.ba_passwd = test_utils.read_password_file(os.path.expanduser('~/.ssh/ba_passwd'))
 
         #xoauth hanlding
         self.ga_login = 'guillaume.aubert@gmail.com'
-        self.ga_cred  = test_utils.get_oauth_cred(self.ga_login, '/homespace/gaubert/.ssh/ga_oauth')
+        self.ga_cred  = test_utils.get_oauth_cred(self.ga_login, os.path.expanduser('~/.ssh/ga_oauth'))
 
     def search_for_email(self, gmvaulter, req):
         """
@@ -66,7 +67,7 @@ class TestEssentialGMVault(unittest.TestCase): #pylint:disable-msg=R0904
         test_utils.clean_mailbox(self.gsync_login, gsync_credential)
 
         # test restore
-        test_db_dir = "/homespace/gaubert/gmvault-dbs/essential-dbs"
+        test_db_dir = "~/gmvault-dbs/essential-dbs"
         #test_db_dir = "/home/gmv/Dev/projects/gmvault-develop/src/test-db"
         #test_db_dir = "/Users/gaubert/Dev/projects/gmvault-develop/src/test-db"
         

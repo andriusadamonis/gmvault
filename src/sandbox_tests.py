@@ -25,6 +25,7 @@ Experimentation and validation of internal mechanisms
 '''
 
 import unittest
+import os
 import base64
 import socket
 import imaplib
@@ -75,9 +76,9 @@ class TestSandbox(unittest.TestCase): #pylint:disable-msg=R0904
         self.gmvault_passwd = None 
     
     def setUp(self): #pylint:disable-msg=C0103
-        self.login, self.passwd = read_password_file('/homespace/gaubert/.ssh/passwd')
+        self.login, self.passwd = read_password_file(os.path.expanduser('~/.ssh/passwd'))
         
-        self.gmvault_login, self.gmvault_passwd = read_password_file('/homespace/gaubert/.ssh/gsync_passwd')
+        self.gmvault_login, self.gmvault_passwd = read_password_file(os.path.expanduser('~/.ssh/gsync_passwd'))
         
         
     def ztest_logger(self):
