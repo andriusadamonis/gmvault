@@ -1,6 +1,6 @@
 '''
     Gmvault: a tool to backup and restore your gmail account.
-    Copyright (C) <2011-2013>  <guillaume Aubert (guillaume dot aubert at gmail do com)>
+    Copyright (C) <since 2011>  <guillaume Aubert (guillaume dot aubert at gmail do com)>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as
@@ -102,7 +102,7 @@ def handle_sync_imap_error(the_exception, the_id, error_report, src):
         except Exception, _: #pylint:disable-msg=W0703
             curr = None
             LOG.critical("Error when trying to get gmail id for message with imap id %s." % (the_id))
-            LOG.critical("Disconnect, wait for 20 sec then reconnect.")
+            LOG.critical("Disconnect, wait for 10 sec then reconnect.")
             src.disconnect()
             #could not fetch the gm_id so disconnect and sleep
             #sleep 10 sec
@@ -111,7 +111,7 @@ def handle_sync_imap_error(the_exception, the_id, error_report, src):
             src.connect()
             
         if curr:
-            gmail_id = curr[the_id][imap_utils.GIMAPFetcher.GMAIL_ID]
+            gmail_id = curr[the_id].get(imap_utils.GIMAPFetcher.GMAIL_ID)
         else:
             gmail_id = None
             
@@ -139,7 +139,7 @@ def handle_sync_imap_error(the_exception, the_id, error_report, src):
                 curr = None
             
             if curr:
-                gmail_id = curr[the_id][imap_utils.GIMAPFetcher.GMAIL_ID]
+                gmail_id = curr[the_id].get(imap_utils.GIMAPFetcher.GMAIL_ID)
             else:
                 gmail_id = None
             
@@ -265,7 +265,8 @@ class GMVaulter(object):
         self.error_report = { 'empty' : [] ,
                               'cannot_be_fetched'  : [],
                               'emails_in_quarantine' : [],
-                              'reconnections' : 0}
+                              'reconnections' : 0,
+                              'key_error' : []}
         
         #instantiate gstorer
         self.gstorer =  gmvault_db.GmailStorer(self.db_root_dir, self.use_encryption)
@@ -290,14 +291,16 @@ class GMVaulter(object):
                   "%s operation performed in %s.\n" \
                   "Number of reconnections: %d.\nNumber of emails quarantined: %d.\n" \
                   "Number of emails that could not be fetched: %d.\n" \
-                  "Number of emails that were returned empty by gmail: %d\n"\
+                  "Number of emails that were returned empty by gmail: %d.\n"\
+                  "Number of emails without label information returned by gmail: %d.\n"\
                   "================================================================" \
               % (self.error_report['operation'], \
                  self.error_report['operation_time'], \
                  self.error_report['reconnections'], \
                  len(self.error_report['emails_in_quarantine']), \
                  len(self.error_report['cannot_be_fetched']), \
-                 len(self.error_report['empty'])
+                 len(self.error_report['empty']), \
+                 len(self.error_report['key_error'])
                 )
               
         LOG.debug("error_report complete structure = %s" % (self.error_report))
@@ -323,7 +326,8 @@ class GMVaulter(object):
            Factory method to create the object if it exists
         """
         try:
-            a_dir = a_gstorer.get_directory_from_id(a_id, a_dir)
+            # pass top dir and found local dir where the files are
+            a_dir = a_gstorer.get_directory_from_id(a_id, a_top_dir = a_gstorer.get_db_dir(), a_local_dir = a_dir)
            
             if a_dir:
                 return a_gstorer.unbury_metadata(a_id, a_dir) 
@@ -430,12 +434,13 @@ class GMVaulter(object):
         """
         # get all imap ids in All Mail
         imap_ids = self.src.search(imap_req)
+
+        last_id_file = self.OP_EMAIL_SYNC if a_type == "email" else self.OP_CHAT_SYNC
         
         # check if there is a restart
         if restart:
             LOG.critical("Restart mode activated for emails. Need to find information in Gmail, be patient ...")
-            imap_ids = self.get_gmails_ids_left_to_sync(self.OP_EMAIL_SYNC if a_type == "email" \
-                                                        else self.OP_CHAT_SYNC, imap_ids, imap_req)
+            imap_ids = self.get_gmails_ids_left_to_sync(last_id_file, imap_ids, imap_req)
         
         total_nb_msgs_to_process = len(imap_ids) # total number of emails to get
         
@@ -466,21 +471,41 @@ class GMVaulter(object):
                 if new_data.get(the_id, None):
                     LOG.debug("\nProcess imap id %s" % ( the_id ))
                         
-                    gid      = new_data[the_id][imap_utils.GIMAPFetcher.GMAIL_ID]
-                    eml_date = new_data[the_id][imap_utils.GIMAPFetcher.IMAP_INTERNALDATE]
+                    gid      = new_data[the_id].get(imap_utils.GIMAPFetcher.GMAIL_ID, None)
+                    eml_date = new_data[the_id].get(imap_utils.GIMAPFetcher.IMAP_INTERNALDATE, None)
+
+                    if gid is None or eml_date is None:
+                        LOG.info("Ignore email with id %s. No %s nor %s found in %s." % (the_id, imap_utils.GIMAPFetcher.GMAIL_ID, imap_utils.GIMAPFetcher.IMAP_INTERNALDATE, new_data[the_id]))
+                        self.error_report['empty'].append((the_id, gid if gid else None))
+                        pass #ignore this email and process the next one
                     
                     if a_type == "email":
                         the_dir = gmvault_utils.get_ym_from_datetime(eml_date)
                     elif a_type == "chat":
-                        the_dir = self.gstorer.get_sub_chats_dir()
+                        the_dir = "%s/%s" % (self.gstorer.CHATS_AREA, os.path.split(self.gstorer.get_sub_chats_dir(gid))[1])
                     else:
                         raise Exception("Error a_type %s in _common_sync is unknown" % (a_type))
                     
                     LOG.critical("Process %s num %d (imap_id:%s) from %s." % (a_type, nb_msgs_processed, the_id, the_dir))
                     
                     #decode the labels that are received as utf7 => unicode
-                    new_data[the_id][imap_utils.GIMAPFetcher.GMAIL_LABELS] = \
-                    imap_utils.decode_labels(new_data[the_id][imap_utils.GIMAPFetcher.GMAIL_LABELS])
+                    try:
+                        new_data[the_id][imap_utils.GIMAPFetcher.GMAIL_LABELS] = \
+                             imap_utils.decode_labels(new_data[the_id][imap_utils.GIMAPFetcher.GMAIL_LABELS])
+                    except KeyError, ke:
+                        LOG.info("KeyError, reason: %s. new_data[%s]=%s" % (str(ke), the_id, new_data.get(the_id)))
+                        # try to fetch it individually and replace current info if it fails then raise error.
+                        id_info = None
+                        try:
+                            id_info = batch_fetcher.individual_fetch(the_id)
+                            new_data[the_id][imap_utils.GIMAPFetcher.GMAIL_LABELS] = \
+                                imap_utils.decode_labels(id_info[imap_utils.GIMAPFetcher.GMAIL_LABELS])
+                        except Exception, err:
+                            LOG.debug("Error when trying to fetch again information for email id %s. id_info = %s. exception:(%s)" \
+                                      % (the_id, id_info, str(err)))
+                            LOG.info("Missing labels information for email id %s. Ignore it\n" % (the_id))
+                            self.error_report['key_error'].append((the_id, new_data.get(the_id)))
+                            continue
 
                     LOG.debug("metadata info collected: %s\n" % (new_data[the_id]))
                 
@@ -509,7 +534,7 @@ class GMVaulter(object):
                             #get the data
                             LOG.debug("Get Data for %s." % (gid))
                             email_data = self.src.fetch(the_id, imap_utils.GIMAPFetcher.GET_DATA_ONLY )
-                            
+
                             new_data[the_id][imap_utils.GIMAPFetcher.EMAIL_BODY] = \
                             email_data[the_id][imap_utils.GIMAPFetcher.EMAIL_BODY]
                             
@@ -537,7 +562,7 @@ class GMVaulter(object):
                     # save id every 10 restored emails
                     if (nb_msgs_processed % 10) == 0:
                         if gid:
-                            self.save_lastid(self.OP_EMAIL_SYNC, gid, eml_date, imap_req)
+                            self.save_lastid(last_id_file, gid, eml_date, imap_req)
                 else:
                     LOG.info("Could not process message with id %s. Ignore it\n" % (the_id))
                     self.error_report['empty'].append((the_id, gid if gid else None))
@@ -649,7 +674,7 @@ class GMVaulter(object):
             
             # syntax for 2.7 set comprehension { data[key][imap_utils.GIMAPFetcher.GMAIL_ID] for key in data }
             # need to create a list for 2.6
-            db_gmail_ids.difference_update([data[key][imap_utils.GIMAPFetcher.GMAIL_ID] for key in data ])
+            db_gmail_ids.difference_update([data[key].get(imap_utils.GIMAPFetcher.GMAIL_ID) for key in data if data[key].get(imap_utils.GIMAPFetcher.GMAIL_ID)])
             
             if len(db_gmail_ids) == 0:
                 break
@@ -785,66 +810,67 @@ class GMVaulter(object):
         pass
         
     
-    def save_lastid(self, op_type, gm_id, eml_date = None, imap_req = None):#pylint:disable-msg=W0613
+    def save_lastid(self, op_type, gm_id, eml_date=None, imap_req=None):#pylint:disable-msg=W0613
         """
            Save the passed gmid in last_id.restore
            For the moment reopen the file every time
         """
-        
+
         filename = self.OP_TO_FILENAME.get(op_type, None)
-        
+
         if not filename:
-            raise Exception("Bad Operation (%s) in save_last_id. "\
-                            "This should not happen, send the error to the software developers." % (op_type))
-        
-        filepath = '%s/%s_%s' % (self.gstorer.get_info_dir(), self.login, filename)  
-        
-        the_fd = open(filepath, 'w')
-        
-        #json.dump({
-        #            'last_id' : gm_id,
-        #            'date'    : gmvault_utils.datetime2e(eml_date) if eml_date else None,
-        #            'req'     : imap_req 
-        #          }, the_fd)
-        
-        json.dump({
-                    'last_id' : gm_id,
-                  }, the_fd)
-        
-        the_fd.close()
-        
+            raise Exception("Bad Operation (%s) in save_last_id. "
+                            "This should not happen, send the error to the "
+                            "software developers." % op_type)
+
+        filepath = '%s/%s_%s' % (self.gstorer.get_info_dir(), self.login,
+                                 filename)
+
+        with open(filepath, 'w') as f:
+
+            #json.dump({
+            #            'last_id' : gm_id,
+            #            'date'    : gmvault_utils.datetime2e(eml_date) if eml_date else None,
+            #            'req'     : imap_req
+            #          }, the_fd)
+
+            json.dump({
+                'last_id': gm_id,
+            }, f)
+
     def get_gmails_ids_left_to_restore(self, op_type, db_gmail_ids_info):
         """
            Get the ids that still needs to be restored
            Return a dict key = gm_id, val = directory
         """
         filename = self.OP_TO_FILENAME.get(op_type, None)
-        
+
         if not filename:
-            raise Exception("Bad Operation (%s) in save_last_id. This should not happen,"\
-                            " send the error to the software developers." % (op_type))
-        
-        
+            raise Exception("Bad Operation (%s) in save_last_id. This should "
+                            "not happen, send the error to the software "
+                            "developers." % op_type)
+
         #filepath = '%s/%s_%s' % (gmvault_utils.get_home_dir_path(), self.login, filename)
         filepath = '%s/%s_%s' % (self.gstorer.get_info_dir(), self.login, filename)
-        
+
         if not os.path.exists(filepath):
             LOG.critical("last_id restore file %s doesn't exist.\nRestore the full list of backed up emails." %(filepath))
             return db_gmail_ids_info
-        
-        json_obj = json.load(open(filepath, 'r'))
-        
+
+        with open(filepath, 'r') as f:
+            json_obj = json.load(f)
+
         last_id = json_obj['last_id']
-        
+
         last_id_index = -1
         try:
             keys = db_gmail_ids_info.keys()
             last_id_index = keys.index(last_id)
-            LOG.critical("Restart from gmail id %s." % (last_id))
+            LOG.critical("Restart from gmail id %s." % last_id)
         except ValueError, _:
             #element not in keys return current set of keys
             LOG.error("Cannot restore from last restore gmail id. It is not in the disk database.")
-        
+
         new_gmail_ids_info = collections_utils.OrderedDict()
         if last_id_index != -1:
             for key in db_gmail_ids_info.keys()[last_id_index+1:]:
@@ -955,7 +981,7 @@ class GMVaulter(object):
                                     email_meta[self.gstorer.INT_DATE_K] )      
                 
                     #labels for this email => real_labels U extra_labels
-                    labels = set(email_meta[self.gstorer.LABELS_K])
+                    labels = set(email_meta.get(self.gstorer.LABELS_K,[]) if email_meta else [])
                     
                     # add in the labels_to_create struct
                     for label in labels:
@@ -992,7 +1018,11 @@ class GMVaulter(object):
                     self.src.apply_labels_to(labels_to_apply[label], [label]) 
             except Exception, err:
                 LOG.error("Problem when applying labels %s to the following ids: %s" %(label, labels_to_apply[label]), err)
-                if isinstance(err, imaplib.IMAP4.abort) and str(err).find("=> Gmvault ssl socket error: EOF") >= 0:
+                if isinstance(err, imap_utils.LabelError) and err.ignore() == True:
+                    LOG.critical("Ignore labelling: %s" % (err))
+                    LOG.critical("Disconnecting and reconnecting to restart cleanly.")
+                    self.src.reconnect() #reconnect
+                elif isinstance(err, imaplib.IMAP4.abort) and str(err).find("=> Gmvault ssl socket error: EOF") >= 0:
                     # if this is a Gmvault SSL Socket error ignore labelling and continue the restore
                     LOG.critical("Ignore labelling")
                     LOG.critical("Disconnecting and reconnecting to restart cleanly.")
@@ -1017,7 +1047,7 @@ class GMVaulter(object):
             
             # save id every nb_items restored emails
             # add the last treated gm_id
-            self.save_lastid(self.OP_EMAIL_RESTORE, last_id)
+            self.save_lastid(self.OP_CHAT_RESTORE, last_id)
             
         return self.error_report 
                     
@@ -1076,6 +1106,9 @@ class GMVaulter(object):
             # unbury the metadata for all these emails
             for gm_id in group_imap_ids:    
                 try:
+
+                    LOG.debug("Unbury email with gm_id %s." % (gm_id))
+
                     email_meta, email_data = self.gstorer.unbury_email(gm_id)
                     
                     LOG.critical("Pushing email body with id %s." % (gm_id))
@@ -1087,7 +1120,9 @@ class GMVaulter(object):
                                     email_meta[self.gstorer.INT_DATE_K] )      
                 
                     #labels for this email => real_labels U extra_labels
-                    labels = set(email_meta[self.gstorer.LABELS_K])
+                    #bullet proof 
+                    labels = set(email_meta.get(self.gstorer.LABELS_K,[]) if email_meta else [])
+                    
 
                     # add in the labels_to_create struct
                     for label in labels:
@@ -1119,7 +1154,6 @@ class GMVaulter(object):
                 
             # associate labels with emails
             LOG.critical("Applying labels to the current batch of emails.")
-
             try:
                 LOG.debug("Changing directory. Going into ALLMAIL")
                 the_timer = gmvault_utils.Timer()
@@ -1130,8 +1164,11 @@ class GMVaulter(object):
                     self.src.apply_labels_to(labels_to_apply[label], [label]) 
             except Exception, err:
                 LOG.error("Problem when applying labels %s to the following ids: %s" %(label, labels_to_apply[label]), err)
-                LOG.error("Problem when applying labels.", err)
-                if isinstance(err, imaplib.IMAP4.abort) and str(err).find("=> Gmvault ssl socket error: EOF") >= 0:
+                if isinstance(err, imap_utils.LabelError) and err.ignore() == True:
+                    LOG.critical("Ignore labelling: %s" % (err))
+                    LOG.critical("Disconnecting and reconnecting to restart cleanly.")
+                    self.src.reconnect() #reconnect
+                elif isinstance(err, imaplib.IMAP4.abort) and str(err).find("=> Gmvault ssl socket error: EOF") >= 0:
                     # if this is a Gmvault SSL Socket error ignore labelling and continue the restore
                     LOG.critical("Ignore labelling")
                     LOG.critical("Disconnecting and reconnecting to restart cleanly.")

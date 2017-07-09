@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 '''
     Gmvault: a tool to backup and restore your gmail account.
-    Copyright (C) <2011-2013>  <guillaume Aubert (guillaume dot aubert at gmail do com)>
+    Copyright (C) <since 2011>  <guillaume Aubert (guillaume dot aubert at gmail do com)>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as
@@ -150,7 +150,7 @@ class GMVaultLauncher(object):
     def __init__(self):
         """ constructor """
         super(GMVaultLauncher, self).__init__()
-        
+
     @gmvault_utils.memoized
     def _create_parser(self): #pylint: disable=R0915
         """
@@ -182,24 +182,18 @@ class GMVaultLauncher(object):
                
         # for both when seen add const empty otherwise not_seen
         # this allow to distinguish between an empty value and a non seen option
-        
-        
-        sync_parser.add_argument("-o", "--oauth", \
+        sync_parser.add_argument("-y", "--oauth2", \
                           help="use oauth for authentication. (default recommended method)",\
-                          action='store_const', dest="oauth_token", const='empty', default='not_seen')
-        
+                          action='store_const', dest="oauth2_token", const='empty', default='not_seen')
+
         sync_parser.add_argument("-p", "--passwd", \
                           help="use interactive password authentication. (not recommended)",
                           action= 'store_const' , dest="passwd", const='empty', default='not_seen')
-        
-        sync_parser.add_argument("-2", "--2-legged-oauth", \
-                          help="use 2 legged oauth for authentication. (Google Apps Business or Education accounts)",\
-                          action='store_const', dest="two_legged_oauth_token", const='empty', default='not_seen')
-        
-        sync_parser.add_argument("--renew-oauth-tok", \
+
+        sync_parser.add_argument("--renew-oauth2-tok", \
                           help="renew the stored oauth token (two legged or normal) via an interactive authentication session.",
-                          action= 'store_const' , dest="oauth_token", const='renew')
-         
+                          action= 'store_const' , dest="oauth2_token", const='renew')
+
         sync_parser.add_argument("--renew-passwd", \
                           help="renew the stored password via an interactive authentication session. (not recommended)",
                           action= 'store_const' , dest="passwd", const='renew')
@@ -208,6 +202,10 @@ class GMVaultLauncher(object):
                           help="use interactive password authentication, encrypt and store the password. (not recommended)",
                           action= 'store_const' , dest="passwd", const='store')
         
+        #sync_parser.add_argument("-r", "--imap-req", type = get_unicode_commandline_arg, metavar = "REQ", \
+        #                         help="Imap request to restrict sync.",\
+        #                         dest="imap_request", default=None)
+
         sync_parser.add_argument("-r", "--imap-req", metavar = "REQ", \
                                  help="Imap request to restrict sync.",\
                                  dest="imap_request", default=None)
@@ -280,7 +278,7 @@ class GMVaultLauncher(object):
                                  default='full', help='type of restoration: full|quick. (default: full)')
         
         # add a label
-        rest_parser.add_argument('-a', '--apply-label', \
+        rest_parser.add_argument('-a', '--apply-label' , \
                                  action='store', dest='apply_label', \
                                  default=None, help='Apply a label to restored emails')
         
@@ -305,19 +303,18 @@ class GMVaultLauncher(object):
                
         # for both when seen add const empty otherwise not_seen
         # this allow to distinguish between an empty value and a non seen option
-        rest_parser.add_argument("-o", "--oauth", \
-                          help="use oauth for authentication. (default method)",\
-                          action='store_const', dest="oauth_token", const='empty', default='not_seen')
-        
+        rest_parser.add_argument("-y", "--oauth2", \
+                          help="use oauth for authentication. (default recommended method)",\
+                          action='store_const', dest="oauth2_token", const='empty', default='not_seen')
+
         rest_parser.add_argument("-p", "--passwd", \
                           help="use interactive password authentication. (not recommended)",
-                          action='store_const', dest="passwd", const='empty', default='not_seen')
-        
-        rest_parser.add_argument("-2", "--2-legged-oauth", \
-                          help="use 2 legged oauth for authentication. (Google Apps Business or Education accounts)",\
-                          action='store_const', dest="two_legged_oauth_token", const='empty', default='not_seen')
-        
-        
+                          action= 'store_const' , dest="passwd", const='empty', default='not_seen')
+
+        rest_parser.add_argument("--renew-oauth2-tok", \
+                          help="renew the stored oauth token (two legged or normal) via an interactive authentication session.",
+                          action= 'store_const' , dest="oauth2_token", const='renew')
+
         rest_parser.add_argument("--server", metavar = "HOSTNAME", \
                               action='store', help="Gmail imap server hostname. (default: imap.gmail.com)",\
                               dest="host", default="imap.gmail.com")
@@ -348,19 +345,18 @@ class GMVaultLauncher(object):
      
         # for both when seen add const empty otherwise not_seen
         # this allow to distinguish between an empty value and a non seen option
-        check_parser.add_argument("-o", "--oauth", \
-                          help="use oauth for authentication. (default method)",\
-                          action='store_const', dest="oauth_token", const='empty', default='not_seen')
-        
+        check_parser.add_argument("-y", "--oauth2", \
+                          help="use oauth for authentication. (default recommended method)",\
+                          action='store_const', dest="oauth2_token", const='empty', default='not_seen')
+
         check_parser.add_argument("-p", "--passwd", \
                           help="use interactive password authentication. (not recommended)",
-                          action='store_const', dest="passwd", const='empty', default='not_seen')
-        
-        check_parser.add_argument("-2", "--2-legged-oauth", \
-                          help="use 2 legged oauth for authentication. (Google Apps Business or Education accounts)",\
-                          action='store_const', dest="two_legged_oauth_token", const='empty', default='not_seen')
-        
-        
+                          action= 'store_const' , dest="passwd", const='empty', default='not_seen')
+
+        check_parser.add_argument("--renew-oauth2-tok", \
+                          help="renew the stored oauth token (two legged or normal) via an interactive authentication session.",
+                          action= 'store_const' , dest="oauth2_token", const='renew')
+
         check_parser.add_argument("--server", metavar = "HOSTNAME", \
                               action='store', help="Gmail imap server hostname. (default: imap.gmail.com)",\
                               dest="host", default="imap.gmail.com")
@@ -438,29 +434,24 @@ class GMVaultLauncher(object):
         parsed_args['restart']          = options.restart
         
         #user entered both authentication methods
-        if options.passwd == 'empty' and (options.oauth_token == 'empty' or options.two_legged_oauth_token == 'empty'):
+        if options.passwd == 'empty' and (options.oauth2_token == 'empty'):
             parser.error('You have to use one authentication method. '\
-                         'Please choose between XOAuth and password (recommend XOAuth).')
+                         'Please choose between OAuth2 and password (recommend OAuth2).')
         
         # user entered no authentication methods => go to default oauth
-        if options.passwd == 'not_seen' and options.oauth_token == 'not_seen' and options.two_legged_oauth_token == 'not_seen':
+        if options.passwd == 'not_seen' and options.oauth2_token == 'not_seen':
             #default to xoauth
-            options.oauth_token = 'empty'
+            options.oauth2_token = 'empty'
             
         # add passwd
         parsed_args['passwd']           = options.passwd
-        
-        # add oauth tok
-        if options.oauth_token == 'empty':
-            parsed_args['oauth']      = options.oauth_token
-            parsed_args['two_legged'] = False
-        elif options.oauth_token == 'renew':
-            parsed_args['oauth'] = 'renew'
-            parsed_args['two_legged'] = True if options.two_legged_oauth_token == 'empty' else False          
-        elif options.two_legged_oauth_token == 'empty':
-            parsed_args['oauth']      = options.two_legged_oauth_token
-            parsed_args['two_legged'] = True
-        
+
+        # add oauth2 tok
+        if options.oauth2_token == 'empty':
+            parsed_args['oauth2']      = options.oauth2_token
+        elif options.oauth2_token == 'renew':
+            parsed_args['oauth2'] = 'renew'
+
         #add ops type
         if options.type:
             tempo_list = ['auto']
@@ -503,7 +494,6 @@ class GMVaultLauncher(object):
             :except Exception Error
             
         """
-        
         parser = self._create_parser()
           
         options = parser.parse_args()
@@ -610,7 +600,7 @@ class GMVaultLauncher(object):
             pass
     
         #add parser
-        parsed_args['parser']           = parser
+        parsed_args['parser'] = parser
         
         return parsed_args
     
@@ -690,10 +680,8 @@ class GMVaultLauncher(object):
         
         # handle credential in all levels
         syncer = gmvault.GMVaulter(args['db-dir'], args['host'], args['port'], \
-                                       args['email'], credential, read_only_access = True, use_encryption = args['encrypt'])
-        
-        
-        
+                                   args['email'], credential, read_only_access = True, \
+                                   use_encryption = args['encrypt'])
         #full sync is the first one
         if args.get('type', '') == 'full':
         
@@ -736,7 +724,8 @@ class GMVaultLauncher(object):
         elif args.get('type', '') == 'custom':
             
             #convert args to unicode
-            args['request']['req']     = gmvault_utils.convert_to_unicode(args['request']['req'])
+            u_str = gmvault_utils.convert_argv_to_unicode(args['request']['req'])
+            args['request']['req']     = u_str
             args['request']['charset'] = 'utf-8' #for the moment always utf-8
             args['request']['mode']    = 'custom'
 
@@ -776,12 +765,10 @@ class GMVaultLauncher(object):
         die_with_usage = True
         
         try:
-            
             if args.get('command') not in ('export'):
                 credential = CredentialHelper.get_credential(args)
             
             if args.get('command', '') == 'sync':
-                
                 self._sync(args, credential)
                 
             elif args.get('command', '') == 'restore':
@@ -833,8 +820,10 @@ class GMVaultLauncher(object):
             LOG.critical("=== End of Exception traceback ===\n")
             die_with_usage = False
         finally: 
-            if on_error and die_with_usage:
-                args['parser'].die_with_usage()
+            if on_error:
+                if die_with_usage:
+                    args['parser'].die_with_usage()
+                sys.exit(1)
  
 def init_logging():
     """
@@ -857,12 +846,12 @@ def sigusr1_handler(signum, frame): #pylint:disable=W0613
     """
 
     filename = './gmvault.traceback.txt'
-    
-    print("GMVAULT: Received SIGUSR1 -- Printing stack trace in %s..." % (os.path.abspath(filename)))
 
-    the_f = open(filename, 'a')
-    traceback.print_stack(file = the_f)
-    the_f.close()
+    print("GMVAULT: Received SIGUSR1 -- Printing stack trace in %s..." %
+          os.path.abspath(filename))
+
+    with open(filename, 'a') as f:
+        traceback.print_stack(file=f)
 
 def register_traceback_signal():
     """ To register a USR1 signal allowing to get stack trace """
@@ -878,7 +867,7 @@ def bootstrap_run():
     """ temporary bootstrap """
     
     init_logging()
-    
+
     #force argv[0] to gmvault
     sys.argv[0] = "gmvault"
     
@@ -887,7 +876,7 @@ def bootstrap_run():
     gmvlt = GMVaultLauncher()
     
     args = gmvlt.parse_args()
-    
+
     #activate debug if enabled
     if args['debug']:
         LOG.critical("Activate debugging information.")
@@ -906,9 +895,9 @@ if __name__ == '__main__':
     #memdebug.start(8080)
     #import sys
     #print("sys.argv=[%s]" %(sys.argv))
-    
+
     register_traceback_signal()
     
     bootstrap_run()
     
-    sys.exit(0)
+    #sys.exit(0)

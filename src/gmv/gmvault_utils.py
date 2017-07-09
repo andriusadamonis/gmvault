@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 '''
     Gmvault: a tool to backup and restore your gmail account.
-    Copyright (C) <2011-2013>  <guillaume Aubert (guillaume dot aubert at gmail do com)>
+    Copyright (C) <since 2011>  <guillaume Aubert (guillaume dot aubert at gmail do com)>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as
@@ -25,12 +25,15 @@ import time
 import calendar
 import fnmatch
 import functools
-
 import StringIO
 import sys
 import traceback
 import random 
 import locale
+import urllib
+import shutil
+
+import chardet
 
 import gmv.log_utils as log_utils
 import gmv.conf.conf_helper
@@ -38,7 +41,7 @@ import gmv.gmvault_const as gmvault_const
 
 LOG = log_utils.LoggerFactory.get_logger('gmvault_utils')
 
-GMVAULT_VERSION = "1.8.1-beta"
+GMVAULT_VERSION = "1.9.2-beta-1"
 
 class memoized(object): #pylint: disable=C0103
     """Decorator that caches a function's return value each time it is called.
@@ -118,6 +121,15 @@ def get_exception_traceback():
     traceback.print_exception(exception_type, exception_value, exception_traceback, file = the_file)
     return the_file.getvalue()
 
+def cs_raw_input(a_str):
+    """
+       Write a custom raw input because the standard one is not properly flushing stdout
+    """
+    sys.stdout.write(a_str)
+    sys.stdout.flush() #flush stdout
+    #wait for a readline
+    return sys.stdin.readline()
+
 
 MULTI_SPACES_PATTERN = r"\s{2,}"
 MULTI_SPACES_RE = re.compile(MULTI_SPACES_PATTERN, flags=re.U) #to support unicode
@@ -130,31 +142,6 @@ def remove_consecutive_spaces_and_strip(a_str):
     #return re.sub("\s{2,}", " ", a_str, flags=re.U).strip()
     return MULTI_SPACES_RE.sub(u" ", a_str).strip()
 
-def buffered_write(fd, data, buf_size = 1048576):
-    """
-       fd: file descriptor where to write
-       data: data to write
-       buf_size: size of the buffer (default 1MB)
-       buffered write handling case when write returns nb of written bytes
-       and when write returns None (Linux)
-    """
-    #LOG.critical("======= In buffered write")
-    total_size = len(data)
-    wr_bytes = 0
-    while wr_bytes < total_size:
-        written = fd.write(buffer(data, wr_bytes, buf_size))
-        if written:
-            wr_bytes += written
-        else:
-            #if buffer size > left then left else buffer size
-            # else buffer size
-            left = total_size - wr_bytes
-            if left < buf_size:
-                wr_bytes += left
-            else:
-                wr_bytes += buf_size
-        
-             
 
 TIMER_SUFFIXES = ['y', 'w', 'd', 'h', 'm', 's']
 
@@ -399,6 +386,9 @@ def e2datetime(a_epoch):
 
     return new_date
 
+def get_utcnow_epoch():
+    return datetime2e(datetime.datetime.utcnow())
+
 def datetime2e(a_date):
     """
         convert datetime in epoch
@@ -453,8 +443,8 @@ def delete_all_under(path, delete_top_dir = False):
     
     if delete_top_dir:
         os.rmdir(path)
-        
-def ordered_dirwalk(a_dir, a_file_wildcards= '*', a_dir_ignore_list = [], sort_func = sorted):#pylint:disable=W0102
+
+def ordered_dirwalk(a_dir, a_file_wildcards='*', a_dir_ignore_list=(), sort_func=sorted):
     """
         Walk a directory tree, using a generator.
         This implementation returns only the files in all the subdirectories.
@@ -464,7 +454,6 @@ def ordered_dirwalk(a_dir, a_file_wildcards= '*', a_dir_ignore_list = [], sort_f
         a_wildcards: Filtering wildcards a la unix
     """
 
-    
     sub_dirs = []
     for the_file in sort_func(os.listdir(a_dir)):
         fullpath = os.path.join(a_dir, the_file)
@@ -472,16 +461,16 @@ def ordered_dirwalk(a_dir, a_file_wildcards= '*', a_dir_ignore_list = [], sort_f
             sub_dirs.append(fullpath) #it is a sub_dir
         elif fnmatch.fnmatch(fullpath, a_file_wildcards):
             yield fullpath
-        
+
     #iterate over sub_dirs
     for sub_dir in sort_func(sub_dirs):
         if os.path.basename(sub_dir) not in a_dir_ignore_list:
             for p_elem in ordered_dirwalk(sub_dir, a_file_wildcards):
                 yield p_elem 
         else:
-            LOG.debug("Ignore subdir %s" % (sub_dir))
-  
-def dirwalk(a_dir, a_wildcards= '*'):
+            LOG.debug("Ignore subdir %s" % sub_dir)
+
+def dirwalk(a_dir, a_wildcards='*'):
     """
        return all files and dirs in a directory
     """
@@ -509,41 +498,113 @@ def profile_this(fn):
         prof.dump_stats(fpath)
         return ret
     return profiled_fn
-                
+
+DEFAULT_ENC_LIST = ['ascii','iso-8859-1','iso-8859-2','windows-1250','windows-1252','utf-8']
+
+class GuessEncoding(Exception): pass    # Guess encoding error
+
+def guess_encoding(byte_str, use_encoding_list=True):
+    """
+       byte_str: byte string
+       use_encoding_list: To try or not to brut force guess with the predefined list
+       Try to guess the encoding of byte_str
+       if encoding cannot be found return utf-8
+    """
+    encoding = None
+
+    if type(byte_str) == type(unicode()):
+       raise GuessEncoding("Error. The passed string is a unicode string and not a byte string")
+
+    if use_encoding_list:
+        encoding_list = get_conf_defaults().get('Localisation', 'encoding_guess_list', DEFAULT_ENC_LIST)
+        for enc in encoding_list:
+           try:
+              unicode(byte_str ,enc,"strict")
+              encoding = enc
+           except:
+              pass
+           else:
+              break
+
+    if not encoding:
+       #detect encoding with chardet
+       enc = chardet.detect(byte_str)
+       if enc and enc.get("encoding") != None:
+          encoding = enc.get("encoding")
+       else:
+          LOG.debug("Force encoding to utf-8")
+          encoding = "utf-8"
+
+    return encoding
+
+
 def convert_to_unicode(a_str):
     """
-       Try to get the stdin encoding and use it to convert the input string into unicode.
-       It is dependent on the platform (mac osx,linux, windows 
+    Convert a string to unicode (except terminal strings)
+    :param a_str:
+    :return: unicode string
     """
+    encoding = None
+
+    #if email encoding is forced no more guessing
+    email_encoding = get_conf_defaults().get('Localisation', 'email_encoding', None)
+
+    try:
+        if email_encoding:
+            encoding = email_encoding
+        else:
+            LOG.debug("Guess encoding")
+            #guess encoding based on the beginning of the string up to 128K character
+            encoding = guess_encoding(a_str[:20000], use_encoding_list = False)
+
+        LOG.debug("Convert to %s" % (encoding))
+        u_str = unicode(a_str, encoding = encoding) #convert to unicode with given encoding
+    except Exception, e:
+        LOG.debug("Exception: %s" % (e))
+        LOG.info("Warning: Guessed encoding = (%s). Ignore those characters" % (encoding if encoding else "Not defined"))
+        #try utf-8
+        u_str = unicode(a_str, encoding="utf-8", errors='replace')
+
+    return u_str
+
+def convert_argv_to_unicode(a_str):
+    """
+       Convert command line individual arguments (argv to unicode)
+    """
+    #if str is already unicode do nothing and return the str
+    if type(a_str) == type(unicode()):
+        return a_str
+
     #encoding can be forced from conf
-    term_encoding = get_conf_defaults().get('Localisation', 'term_encoding', None)
-    if not term_encoding:
-        term_encoding = locale.getpreferredencoding() #use it to find the encoding for text terminal
-        if not term_encoding:
+    terminal_encoding = get_conf_defaults().get('Localisation', 'terminal_encoding', None)
+    if not terminal_encoding:
+        terminal_encoding = locale.getpreferredencoding() #use it to find the encoding for text terminal
+        LOG.debug("encoding found with locale.getpreferredencoding()")
+        if not terminal_encoding:
             loc = locale.getdefaultlocale() #try to get defaultlocale()
             if loc and len(loc) == 2:
-                term_encoding = loc[1]
+                LOG.debug("encoding found with locale.getdefaultlocale()")
+                terminal_encoding = loc[1]
             else:
-                LOG.debug("Odd. loc = %s. Do not specify the encoding, let Python do its own investigation" % (loc))
+                LOG.debug("Cannot Terminal encoding using locale.getpreferredencoding() and locale.getdefaultlocale(), loc = %s. Use chardet to try guessing the encoding." % (loc if loc else "None"))
+                terminal_encoding = guess_encoding(a_str)
     else:
-        LOG.debug("Encoding forced. Read it from [Localisation]:term_encoding=%s" % (term_encoding))
-        
-    try: #encode
-        u_str = unicode(a_str, term_encoding, errors='ignore')
-           
-        LOG.debug("raw unicode     = %s." % (u_str))
-        LOG.debug("chosen encoding = %s." % (term_encoding))
-        LOG.debug("unicode_escape val = %s." % ( u_str.encode('unicode_escape')))
-    except Exception, err:
-        LOG.error(err)
-        get_exception_traceback()
-        LOG.debug("Cannot convert to unicode from encoding:%s" % (term_encoding)) #add error
-        u_str = unicode(a_str, errors='ignore')
+       LOG.debug("Use terminal encoding forced from the configuration file.") 
+    try:
+       LOG.debug("terminal encoding = %s." % (terminal_encoding))
+       #decode byte string to unicode and fails in case of error
+       u_str = a_str.decode(terminal_encoding)
+       LOG.debug("unicode_escape val = %s." % (u_str.encode('unicode_escape')))
+       LOG.debug("raw unicode     = %s." % (u_str))
+    except Exception, err: 
+       LOG.error(err)
+       get_exception_traceback()
+       LOG.info("Convertion of %s from %s to a unicode failed. Will now convert to unicode using utf-8 encoding and ignoring errors (non utf-8 characters will be eaten)." % (a_str, terminal_encoding))
+       LOG.info("Please set properly the Terminal encoding or use the [Localisation]:terminal_encoding property to set it.")
+       u_str = unicode(a_str, encoding='utf-8', errors='ignore')
 
-    LOG.debug("hexval %s" % (ascii_hex(u_str)))
-    
     return u_str
-                
+
 @memoized
 def get_home_dir_path():
     """
@@ -589,7 +650,7 @@ VERSION_PATTERN  = r'\s*conf_version=\s*(?P<version>\S*)\s*'
 VERSION_RE  = re.compile(VERSION_PATTERN)
 
 #list of version conf to not overwrite with the next
-VERSIONS_TO_PRESERVE = [ '1.8.1' ]
+VERSIONS_TO_PRESERVE = [ '1.9.2-beta-1' ]
 
 def _get_version_from_conf(home_conf_file):
     """
@@ -611,20 +672,18 @@ def _create_default_conf_file(home_conf_file):
     """
        Write on disk the default file
     """
-    LOG.critical("Create defaults in %s. Please touch this file only if you know what to do." % (home_conf_file))
+    LOG.critical("Create defaults in %s. Please touch this file only if you know what to do." % home_conf_file)
     try:
-        the_fd = open(home_conf_file, "w+")
-        the_fd.write(gmvault_const.DEFAULT_CONF_FILE)
-        the_fd.close()
+        with open(home_conf_file, "w+") as f:
+            f.write(gmvault_const.DEFAULT_CONF_FILE)
         return home_conf_file
     except Exception, err:
         #catch all error and let run gmvault with defaults if needed
-        LOG.critical("Ignore Error when trying to create conf file for defaults in %s:\n%s.\n" % (get_home_dir_path(), err) )
+        LOG.critical("Ignore Error when trying to create conf file for defaults in %s:\n%s.\n" % (get_home_dir_path(), err))
         LOG.debug("=== Exception traceback ===")
         LOG.debug(get_exception_traceback())
         LOG.debug("=== End of Exception traceback ===\n")
         #return default file instead
-        return         
 
 @memoized
 def get_conf_filepath():
@@ -645,3 +704,67 @@ def get_conf_filepath():
             return _create_default_conf_file(home_conf_file)    
     
     return home_conf_file
+
+def copy_default_cacerts_from_module(default_cacert_path):
+    """
+       Copy the default cacert.pem that is stored in the gmv module
+    """
+    import pkg_resources #use setuptools pkg_resources to locate the file
+    ca_mod_filename = pkg_resources.resource_filename('gmv','cacerts/cacert.pem')
+    LOG.debug("Copy cacert.pem (%s) to %s" %(ca_mod_filename, default_cacert_path))
+    shutil.copyfile(ca_mod_filename, default_cacert_path)
+
+
+@memoized
+def get_ca_certs_filepath():
+   """ 
+       Need to pack in Gmvault the default CA Certs (and the one for Gmail) in order to allow the CA cert default verification.
+       Need to do it because not all platforms have them installed.
+       it is by default in $HOME/.gmvault but can be changed by configuration
+   """
+   """
+      TODO: Check if cacerts file path exists and in the get_home_dir_path(). If not then copy it there from the module.
+      If somewhere else it means that it has been moved by the user and cannot be found
+   """
+   default_cacert_path = "%s/cacert.pem" % get_home_dir_path()
+   cacerts_filepath = get_conf_defaults().get("GoogleOauth2", "ca_certs_filepath", default_cacert_path )
+   LOG.debug("cacert.pem file location %s" % (cacerts_filepath))
+   if cacerts_filepath == default_cacert_path and not os.path.exists(cacerts_filepath):
+       copy_default_cacerts_from_module(default_cacert_path)
+   elif not os.path.exists(cacerts_filepath):
+       raise Exception("Cannot find ca certificate files in %s. Please check if the file exists or if ca_certs_filepath in the [GoogleOauth2] group of the configuration file is properly set" % cacerts_filepath)
+
+   return cacerts_filepath 
+
+def chunker(seq, size):
+    """Returns the contents of `seq` in chunks of up to `size` items."""
+    return (seq[pos:pos + size] for pos in xrange(0, len(seq), size))
+
+
+def escape_url(text):
+  """
+  Escape characters as expected in OAUTH 5.1
+  :param text: the escaped url
+  :return: escaped url
+  """
+  return urllib.quote(text, safe='~-._')
+
+
+def unescape_url(text):
+  """
+  Unescaped characters when needed (see OAUTH 5.1)
+  :param text:
+  :return: unescaped url
+  """
+  return urllib.unquote(text)
+
+def format_url_params(params):
+  """
+  Formats given parameters as URL query string.
+  :param params: a python dict
+  :return: A URL query string version of the given dict.
+  """
+  param_elements = []
+  for param in sorted(params.iteritems(), key=lambda x: x[0]):
+    param_elements.append('%s=%s' % (param[0], escape_url(param[1])))
+  return '&'.join(param_elements)

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 '''
     Gmvault: a tool to backup and restore your gmail account.
-    Copyright (C) <2011-2013>  <guillaume Aubert (guillaume dot aubert at gmail do com)>
+    Copyright (C) <since 2011>  <guillaume Aubert (guillaume dot aubert at gmail do com)>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as
@@ -28,6 +28,7 @@ import functools
 
 import ssl
 import imaplib
+import imapclient
 
 import gmv.gmvault_const as gmvault_const
 import gmv.log_utils as log_utils
@@ -52,6 +53,21 @@ class PushEmailError(Exception):
     def quarantined(self):
         """ Get email to quarantine """
         return self._in_quarantine
+
+class LabelError(Exception):
+    """
+       LabelError. Exception send when there is an error when adding labels to message
+    """
+    def __init__(self, a_msg, ignore = False):
+        """
+           Constructor
+        """
+        super(LabelError, self).__init__(a_msg)
+        self._ignore = ignore
+    
+    def ignore(self):
+        """ ignore """
+        return self._ignore
 
 #retry decorator with nb of tries and sleep_time and backoff
 def retry(a_nb_tries=3, a_sleep_time=1, a_backoff=1): #pylint:disable=R0912
@@ -120,7 +136,7 @@ def retry(a_nb_tries=3, a_sleep_time=1, a_backoff=1): #pylint:disable=R0912
                     LOG.debug("error message = %s. traceback:%s" % (p_err, gmvault_utils.get_exception_traceback()))
                     
                     if nb_tries[0] < a_nb_tries:
-                        LOG.critical("Cannot reach the Gmail server. Wait %s seconds and retrying." % (m_sleep_time[0]))
+                        LOG.critical("Cannot reach the Gmail server. Wait %s second(s) and retrying." % (m_sleep_time[0]))
                     else:
                         LOG.critical("Stop retrying, tried too many times ...")
                     
@@ -131,7 +147,7 @@ def retry(a_nb_tries=3, a_sleep_time=1, a_backoff=1): #pylint:disable=R0912
                     LOG.debug("IMAP (abort) error message = %s. traceback:%s" % (err, gmvault_utils.get_exception_traceback()))
                     
                     if nb_tries[0] < a_nb_tries:
-                        LOG.critical("Received an IMAP abort error. Wait %s seconds and retrying." % (m_sleep_time[0]))
+                        LOG.critical("Received an IMAP abort error. Wait %s second(s) and retrying." % (m_sleep_time[0]))
                     else:
                         LOG.critical("Stop retrying, tried too many times ...")
                         
@@ -142,7 +158,7 @@ def retry(a_nb_tries=3, a_sleep_time=1, a_backoff=1): #pylint:disable=R0912
                     LOG.debug("error message = %s. traceback:%s" % (sock_err, gmvault_utils.get_exception_traceback()))
                     
                     if nb_tries[0] < a_nb_tries:
-                        LOG.critical("Cannot reach the Gmail server. Wait %s seconds and retrying." % (m_sleep_time[0]))
+                        LOG.critical("Cannot reach the Gmail server. Wait %s second(s) and retrying." % (m_sleep_time[0]))
                     else:
                         LOG.critical("Stop retrying, tried too many times ...")
                         
@@ -152,7 +168,7 @@ def retry(a_nb_tries=3, a_sleep_time=1, a_backoff=1): #pylint:disable=R0912
                     LOG.debug("error message = %s. traceback:%s" % (ssl_err, gmvault_utils.get_exception_traceback()))
                     
                     if nb_tries[0] < a_nb_tries:
-                        LOG.critical("Cannot reach the Gmail server. Wait %s seconds and retrying." % (m_sleep_time[0]))
+                        LOG.critical("Cannot reach the Gmail server. Wait %s second(s) and retrying." % (m_sleep_time[0]))
                     else:
                         LOG.critical("Stop retrying, tried too many times ...")
                         
@@ -164,7 +180,7 @@ def retry(a_nb_tries=3, a_sleep_time=1, a_backoff=1): #pylint:disable=R0912
                     LOG.debug("IMAP (normal) error message = %s. traceback:%s" % (err, gmvault_utils.get_exception_traceback()))
                     
                     if nb_tries[0] < a_nb_tries:
-                        LOG.critical("Error when reaching Gmail server. Wait %s seconds and retry up to 2 times." \
+                        LOG.critical("Error when reaching Gmail server. Wait %s second(s) and retry up to 2 times." \
                                      % (m_sleep_time[0]))
                     else:
                         LOG.critical("Stop retrying, tried too many times ...")
@@ -271,18 +287,37 @@ class GIMAPFetcher(object): #pylint:disable=R0902,R0904
         """
            connect to the IMAP server
         """
+
+        # check if it is needed to disbale cert verification (leave that option at the last resort)
+        # if the cert verification doesn't work.
+        disable_cert_verification = gmvault_utils.get_conf_defaults().getboolean("GoogleOauth2", "disable_cacert_verification", default=False)
+        context = None
+        if disable_cert_verification:
+            LOG.critical("Beware disabling CA Cert verification for the IMAP connection to Gmail.")
+            context = imapclient.create_default_context()
+            # don't check if certificate hostname doesn't match target hostname
+            context.check_hostname = False
+            # don't check if the certificate is trusted by a certificate authority
+            context.verify_mode = ssl.CERT_NONE
+        else:
+            # create a custom ssl context to handle CA cert verification in all cases
+            # In some plateform the CA certs are not available so use the ones provided by Gmvault
+            # CA certs are coming from https://curl.haxx.se/ca/cacert.pem
+            context = imapclient.create_default_context(cafile= gmvault_utils.get_ca_certs_filepath())
+
         # create imap object
-        self.server = mimap.MonkeyIMAPClient(self.host, port = self.port, use_uid= self.use_uid, need_ssl= self.ssl)
+        self.server = mimap.MonkeyIMAPClient(self.host, port = self.port, use_uid = self.use_uid, need_ssl = self.ssl, ssl_context = context)
         # connect with password or xoauth
         if self.credential['type'] == 'passwd':
             self.server.login(self.login, self.credential['value'])
-        elif self.credential['type'] == 'xoauth':
-            #connect with xoauth 
+        elif self.credential['type'] == 'oauth2':
+            #connect with oauth2
             if self.once_connected:
-                #already connected once so renew xoauth req because it can expire
-                self.credential['value'] = credential_utils.CredentialHelper.get_xoauth_req_from_email(self.login)
-                
-            self.server.xoauth_login(self.credential['value']) 
+                self.credential = credential_utils.CredentialHelper.get_oauth2_credential(self.login, renew_cred = False)
+
+            LOG.debug("credential['value'] = %s" % (self.credential['value']))
+            #try to login
+            self.server.oauth2_login(self.credential['value'])
         else:
             raise Exception("Unknown authentication method %s. Please use xoauth or passwd authentication " \
                             % (self.credential['type']))
@@ -329,8 +364,9 @@ class GIMAPFetcher(object): #pylint:disable=R0902,R0904
         """
            Try to enable the compression
         """
-        self.server.enable_compression()
-        
+        #self.server.enable_compression()
+        pass
+
     @retry(3,1,2) # try 3 times to reconnect with a sleep time of 1 sec and a backoff of 2. The fourth time will wait 4 sec
     def find_folder_names(self):
         """
@@ -502,30 +538,6 @@ class GIMAPFetcher(object): #pylint:disable=R0902,R0904
            Return all attributes associated to each message
         """
         return self.server.fetch(a_ids, a_attributes)
-                
-    
-    @classmethod
-    def _old_build_labels_str(cls, a_labels):
-        """
-           Create IMAP label string from list of given labels. 
-           Convert the labels to utf7
-           a_labels: List of labels
-        """
-        # add GMAIL LABELS
-        labels_str = None
-        if a_labels and len(a_labels) > 0:
-            labels_str = '('
-            for label in a_labels:
-                if gmvault_utils.contains_any(label, ' "*'):
-                    label = label.replace('"', '\\"') #replace quote with escaped quotes
-                    labels_str += '\"%s\" ' % (label)
-                else:
-                    labels_str += '%s ' % (label)
-                    #labels_str += '\"%s\" ' % (label) #check if this is always ok or not
-            
-            labels_str = '%s%s' % (labels_str[:-1],')')
-        
-        return labels_str
 
     @classmethod
     def _build_labels_str(cls, a_labels):
@@ -654,10 +666,25 @@ class GIMAPFetcher(object): #pylint:disable=R0902,R0904
         if labels_str:  
             #has labels so update email  
             the_timer.start()
-            #LOG.debug("Before to store labels %s" % (labels_str))
+            LOG.debug("Before to store labels %s" % (labels_str))
             id_list = ",".join(map(str, imap_ids))
             #+X-GM-LABELS.SILENT to have not returned data
-            ret_code, data = self.server._imap.uid('STORE', id_list, '+X-GM-LABELS.SILENT', labels_str) #pylint: disable=W0212
+            try:
+                ret_code, data = self.server._imap.uid('STORE', id_list, '+X-GM-LABELS.SILENT', labels_str) #pylint: disable=W0212
+            except imaplib.IMAP4.error, original_err:
+                LOG.info("Error in apply_labels_to. See exception traceback")
+                LOG.debug(gmvault_utils.get_exception_traceback())
+                # try to add labels to each individual ids
+                faulty_ids = []
+                for the_id in imap_ids:
+                    try:
+                       ret_code, data = self.server._imap.uid('STORE', the_id, '+X-GM-LABELS.SILENT', labels_str) #pylint: disable=W0212
+                    except imaplib.IMAP4.error, store_err:
+                       LOG.debug("Error when trying to apply labels %s to emails with imap_id %s. Error:%s" % (labels_str, the_id, store_err))
+                       faulty_ids.append(the_id)
+                
+                #raise an error to ignore faulty emails       
+                raise LabelError("Cannot add Labels %s to emails with uids %s. Error:%s" % (labels_str, faulty_ids, original_err), ignore = True) 
 
             #ret_code, data = self.server._imap.uid('COPY', id_list, labels[0])
             LOG.debug("After storing labels %s. Operation time = %s s.\nret = %s\ndata=%s" \
@@ -665,10 +692,16 @@ class GIMAPFetcher(object): #pylint:disable=R0902,R0904
 
             # check if it is ok otherwise exception
             if ret_code != 'OK':
-                # Try again to code the error message (do not use .SILENT)
-                ret_code, data = self.server._imap.uid('STORE', id_list, '+X-GM-LABELS', labels_str) #pylint: disable=W0212
-                if ret_code != 'OK':
-                    raise PushEmailError("Cannot add Labels %s to emails with uids %d. Error:%s" % (labels_str, imap_ids, data))
+                #update individuals emails
+                faulty_ids = []
+                for the_id in imap_ids:
+                    try:
+                       ret_code, data = self.server._imap.uid('STORE', the_id, '+X-GM-LABELS.SILENT', labels_str) #pylint: disable=W0212
+                    except imaplib.IMAP4.error, store_err:
+                       LOG.debug("Error when trying to apply labels %s to emails with imap_id %s. Error:%s" % (labels_str, the_id, store_err))
+                       faulty_ids.append(the_id)
+
+                raise LabelError("Cannot add Labels %s to emails with uids %s. Error:%s" % (labels_str, faulty_ids, data), ignore = True)
             else:
                 LOG.debug("Stored Labels %s for gm_ids %s" % (labels_str, imap_ids))
        
@@ -782,13 +815,31 @@ class GIMAPFetcher(object): #pylint:disable=R0902,R0904
         #msg = "a_folder = %s" % (a_folder.encode('utf-8'))
         #msg = msg.encode('utf-8')
         #print(msg)
-        res = self.server.append(a_folder, a_body, a_flags, a_internal_time)
+        res = "" #change to an iterable default (empty string)
+        try:
+           #a_body = self._clean_email_body(a_body)
+           res = self.server.append(a_folder, a_body, a_flags, a_internal_time)
+        except imaplib.IMAP4.abort, err:
+           # handle issue when there are invalid characters (This is do to the presence of null characters)
+           if str(err).find("APPEND => Invalid character in literal") >= 0:
+              LOG.critical("Invalid character detected. Try to clean the email and reconnect.")
+              a_body = self._clean_email_body(a_body)
+              self.reconnect()
+              res    = self.server.append(a_folder, a_body, a_flags, a_internal_time)
+        except imaplib.IMAP4.error, toobig:
+           # message is too large. It needs to be quarantined
+           if str(toobig).find("APPEND command error: BAD ['[TOOBIG] Message too large") >= 0:
+              LOG.critical("Message is too big to be pushed in Gmail. Needs to be quarantined")
+              raise PushEmailError("Message too big. Quarantine it.", quarantined = True)
+           else:
+              #normal error handling defer to retry
+              raise toobig
     
         LOG.debug("Appended data with flags %s and internal time %s. Operation time = %s.\nres = %s\n" \
                   % (a_flags, a_internal_time, the_timer.elapsed_ms(), res))
         
         # check res otherwise Exception
-        if '(Success)' not in res:
+        if res == None or "(Success)" not in res:
             raise PushEmailError("GIMAPFetcher cannot restore email in %s account." %(self.login))
         
         match = GIMAPFetcher.APPENDUID_RE.match(res)
@@ -800,61 +851,14 @@ class GIMAPFetcher(object): #pylint:disable=R0902,R0904
             raise PushEmailError("No email id returned by IMAP APPEND command. Quarantine this email.", quarantined = True)
         
         return result_uid          
+
+    def _clean_email_body(self, a_body):
+        """
+           Clean the body of the email
+        """
+        #for the moment just try to remove the null character brut force. In the future will have to parse the email and clean it
+        return a_body.replace("\0", '')
          
-    @retry(4,1,2) # try 4 times to reconnect with a sleep time of 1 sec and a backoff of 2. The fourth time will wait 8 sec
-    def push_email(self, a_body, a_flags, a_internal_time, a_labels):
-        """
-           Push a complete email body 
-        """
-        #protection against myself
-        if self.login == 'guillaume.aubert@gmail.com':
-            raise Exception("Cannot push to this account")
-    
-        the_t = gmvault_utils.Timer()
-        the_t.start()
-        LOG.debug("Before to Append email contents")
-        #res = self.server.append(self.current_folder, a_body, a_flags, a_internal_time)
-        res = self.server.append(u'[Google Mail]/All Mail', a_body, a_flags, a_internal_time)
-    
-        LOG.debug("Appended data with flags %s and internal time %s. Operation time = %s.\nres = %s\n" \
-                  % (a_flags, a_internal_time, the_t.elapsed_ms(), res))
-        
-        # check res otherwise Exception
-        if '(Success)' not in res:
-            raise PushEmailError("GIMAPFetcher cannot restore email in %s account." %(self.login))
-        
-        match = GIMAPFetcher.APPENDUID_RE.match(res)
-        if match:
-            result_uid = int(match.group(1))
-            LOG.debug("result_uid = %s" %(result_uid))
-        else:
-            # do not quarantine it because it seems to be done by Google Mail to forbid data uploading.
-            raise PushEmailError("No email id returned by IMAP APPEND command. Quarantine this email.", quarantined = True)
-        
-        labels_str = self._build_labels_str(a_labels)
-        
-        if labels_str:  
-            #has labels so update email  
-            the_t.start()
-            LOG.debug("Before to store labels %s" % (labels_str))
-            self.server.select_folder(u'[Google Mail]/All Mail', readonly = self.readonly_folder) # go to current folder
-            LOG.debug("Changing folders. elapsed %s s\n" % (the_t.elapsed_ms()))
-            the_t.start()
-            ret_code, data = self.server._imap.uid('STORE', result_uid, '+X-GM-LABELS', labels_str) #pylint: disable=W0212
-            #ret_code = self.server._store('+X-GM-LABELS', [result_uid],labels_str)
-            LOG.debug("After storing labels %s. Operation time = %s s.\nret = %s\ndata=%s" \
-                      % (labels_str, the_t.elapsed_ms(),ret_code, data))
-            
-            LOG.debug("Stored Labels %s in gm_id %s" % (labels_str, result_uid))
-
-            self.server.select_folder(u'[Google Mail]/Drafts', readonly = self.readonly_folder) # go to current folder
-        
-            # check if it is ok otherwise exception
-            if ret_code != 'OK':
-                raise PushEmailError("Cannot add Labels %s to email with uid %d. Error:%s" % (labels_str, result_uid, data))
-        
-        return result_uid
-
 def decode_labels(labels):
     """
        Decode labels when they are received as utf7 entities or numbers
